@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset='utf-8' />
+    <title>Mapbox Storytelling</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <link rel="icon" type="image/x-icon"
+        href="https://raw.githubusercontent.com/mapbox/assembly/publisher-staging/src/svgs/mapbox.svg">
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.css' rel='stylesheet' />
+    <script src="https://cdn.jsdelivr.net/npm/mapbox-gl-globe-minimap@1.2.0/dist/bundle.js"></script>
+    <script src="https://unpkg.com/scrollama"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        a,
+        a:hover,
+        a:visited {
+            color: #0071bc;
+        }
+
+        #map {
+            top: 0;
+            height: 100vh;
+            width: 100vw;
+            position: fixed;
+        }
+
+        #header {
+            margin: auto;
+            width: 100%;
+            position: relative;
+            z-index: 5;
+        }
+
+        #header h1,
+        #header h2,
+        #header p {
+            margin: 0;
+            padding: 2vh 2vw;
+            text-align: center;
+        }
+
+        #footer {
+            width: 100%;
+            min-height: 5vh;
+            padding-top: 2vh;
+            padding-bottom: 2vh;
+            text-align: center;
+            line-height: 25px;
+            font-size: 13px;
+            position: relative;
+            z-index: 5;
+        }
+
+        #features {
+            padding-top: 10vh;
+            padding-bottom: 10vh;
+        }
+
+        .hidden {
+            visibility: hidden;
+        }
+
+        .centered {
+            width: 50vw;
+            margin: 0 auto;
+        }
+
+        .lefty {
+            width: 33vw;
+            margin-left: 5vw;
+        }
+
+        .righty {
+            width: 33vw;
+            margin-left: 62vw;
+        }
+
+        .fully {
+            width: 100%;
+            margin: auto;
+        }
+
+        .light {
+            color: #444;
+            background-color: #fafafa;
+        }
+
+        .dark {
+            color: #fafafa;
+            background-color: #444;
+        }
+
+        .step {
+            padding-bottom: 50vh;
+            opacity: 0.25;
+        }
+
+        .step.active {
+            opacity: 0.9;
+        }
+
+        .step div {
+            padding: 25px 50px;
+            line-height: 25px;
+            font-size: 13px;
+        }
+
+        .step img {
+            width: 100%;
+        }
+
+        @media (max-width: 750px) {
+            .centered,
+            .lefty,
+            .righty,
+            .fully {
+                width: 90vw;
+                margin: 0 auto;
+            }
+        }
+
+        /* Fix issue on mobile browser where scroll breaks  */
+        .mapboxgl-canvas-container.mapboxgl-touch-zoom-rotate.mapboxgl-touch-drag-pan,
+        .mapboxgl-canvas-container.mapboxgl-touch-zoom-rotate.mapboxgl-touch-drag-pan .mapboxgl-canvas {
+            touch-action: unset;
+        }
+
+        .marker {
+            display: block;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-size: cover;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map"></div>
+    <div id="story"></div>
+
+    <script src="./config.js"></script>
+    <script>
+        // весь маршрут
+        const routeCoordinates = [
+            [80.2275, 50.4111], [80.4392, 47.9656], [80.95, 47.85], [79.375, 47.74],
+            [78.2, 46.3], [78.95, 46.25], [79.6081, 45.5136], [78.2117, 43.5642],
+            [78.7, 43.35], [79.07, 43.35], [79.1425, 42.7519], [79.17, 42.724],
+            [78.3642, 42.7278], [78.3936, 42.49], [78.65, 43.2], [78.6103, 43.2031],
+            [77.4517, 43.355], [76.8897, 43.2389], [76.8203, 43.8039], [78.5, 44.0],
+            [78.2078, 44.8681], [79.0556, 45.1081], [79.0569, 45.1314]
+        ];
+
+        var initLoad = true;
+        var layerTypes = {
+            'fill': ['fill-opacity'],
+            'line': ['line-opacity'],
+            'circle': ['circle-opacity', 'circle-stroke-opacity'],
+            'symbol': ['icon-opacity', 'text-opacity'],
+            'raster': ['raster-opacity'],
+            'fill-extrusion': ['fill-extrusion-opacity'],
+            'heatmap': ['heatmap-opacity']
+        };
+
+        var alignments = {
+            'left': 'lefty',
+            'center': 'centered',
+            'right': 'righty',
+            'full': 'fully'
+        };
+
+        function getLayerPaintType(layer) {
+            return layerTypes[map.getLayer(layer).type];
+        }
+
+        function setLayerOpacity(layer) {
+            const props = getLayerPaintType(layer.layer);
+            props.forEach(prop => {
+                const opts = {};
+                if (layer.duration) {
+                    map.setPaintProperty(layer.layer, prop + '-transition', { duration: layer.duration });
+                }
+                map.setPaintProperty(layer.layer, prop, layer.opacity, opts);
+            });
+        }
+
+        // build story markup
+        const story = document.getElementById('story');
+        const features = document.createElement('div');
+        features.id = 'features';
+
+        const header = document.createElement('div');
+        if (config.title) {
+            const h1 = document.createElement('h1');
+            h1.innerText = config.title;
+            header.appendChild(h1);
+        }
+        if (config.subtitle) {
+            const h2 = document.createElement('h2');
+            h2.innerText = config.subtitle;
+            header.appendChild(h2);
+        }
+        if (config.byline) {
+            const p = document.createElement('p');
+            p.innerText = config.byline;
+            header.appendChild(p);
+        }
+        if (header.innerText.length) {
+            header.id = 'header';
+            header.classList.add(config.theme);
+            story.appendChild(header);
+        }
+
+        config.chapters.forEach((rec, i) => {
+            const container = document.createElement('div');
+            container.id = rec.id;
+            container.classList.add('step');
+            if (i === 0) container.classList.add('active');
+
+            const chap = document.createElement('div');
+            chap.classList.add(config.theme);
+
+            if (rec.title) {
+                const t = document.createElement('h3');
+                t.innerText = rec.title;
+                chap.appendChild(t);
+            }
+            if (rec.image) {
+                const img = new Image();
+                img.src = rec.image;
+                chap.appendChild(img);
+            }
+            if (rec.description) {
+                const desc = document.createElement('p');
+                desc.innerHTML = rec.description;
+                chap.appendChild(desc);
+            }
+
+            container.appendChild(chap);
+            container.classList.add(alignments[rec.alignment] || 'centered');
+            if (rec.hidden) container.classList.add('hidden');
+
+            features.appendChild(container);
+        });
+
+        story.appendChild(features);
+
+        if (config.footer) {
+            const footer = document.createElement('div');
+            footer.id = 'footer';
+            footer.classList.add(config.theme);
+            footer.innerHTML = config.footer;
+            story.appendChild(footer);
+        }
+
+        mapboxgl.accessToken = config.accessToken;
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: config.style,
+            center: config.chapters[0].location.center,
+            zoom: config.chapters[0].location.zoom,
+            bearing: config.chapters[0].location.bearing,
+            pitch: config.chapters[0].location.pitch,
+            interactive: false,
+            projection: config.projection
+        });
+
+        if (config.inset) {
+            map.addControl(new GlobeMinimap({ ...config.insetOptions }), config.insetPosition);
+        }
+
+        // custom marker if enabled
+        let marker;
+        if (config.showMarkers) {
+            const el = document.createElement('div');
+            el.className = 'marker';
+            el.style.backgroundImage = 'url(https://i0.wp.com/apgazeta.kz/wp-content/uploads/2020/06/061-3-1.jpg)';
+            marker = new mapboxgl.Marker(el)
+                .setLngLat(config.chapters[0].location.center)
+                .addTo(map);
+        }
+
+        const scroller = scrollama();
+
+        map.on('load', () => {
+            // пустой источник для динамической линии
+            map.addSource('route', {
+                type: 'geojson',
+                data: {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: []
+                    }
+                }
+            });
+            // линия маршрута
+            map.addLayer({
+                id: 'route-line',
+                type: 'line',
+                source: 'route',
+                layout: { 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': '#ff88cc',
+                    'line-width': 4
+                }
+            });
+
+            if (config.use3dTerrain) {
+                map.addSource('mapbox-dem', {
+                    type: 'raster-dem',
+                    url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+                    tileSize: 512,
+                    maxzoom: 14
+                });
+                map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+                map.addLayer({
+                    id: 'sky',
+                    type: 'sky',
+                    paint: {
+                        'sky-type': 'atmosphere',
+                        'sky-atmosphere-sun': [0.0, 0.0],
+                        'sky-atmosphere-sun-intensity': 15
+                    }
+                });
+            }
+
+            scroller
+                .setup({ step: '.step', offset: 0.5, progress: true })
+                .onStepEnter(response => {
+                    const idx = config.chapters.findIndex(c => c.id === response.element.id);
+                    const chap = config.chapters[idx];
+
+                    // покажем сегмент до текущей главы
+                    const seg = routeCoordinates.slice(0, idx);
+                    map.getSource('route').setData({
+                        type: 'Feature',
+                        geometry: { type: 'LineString', coordinates: seg }
+                    });
+
+                    response.element.classList.add('active');
+                    map.flyTo(chap.location);
+
+                    if (config.showMarkers) {
+                        marker.setLngLat(chap.location.center);
+                    }
+                    if (chap.onChapterEnter.length) {
+                        chap.onChapterEnter.forEach(setLayerOpacity);
+                    }
+                })
+                .onStepExit(response => {
+                    const chap = config.chapters.find(c => c.id === response.element.id);
+                    response.element.classList.remove('active');
+                    if (chap.onChapterExit.length) {
+                        chap.onChapterExit.forEach(setLayerOpacity);
+                    }
+                });
+
+            if (config.auto) {
+                document.querySelectorAll('[data-scrollama-index="0"]')[0].scrollIntoView();
+            }
+        });
+    </script>
+
+</body>
+
+</html>
