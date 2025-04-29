@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wheel-Driven Route Animation</title>
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
+  <!-- Turf.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <style>
+    /* Fullscreen map, no page scroll */
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+    /* Popup styling */
+    .mapboxgl-popup-content {
+      max-width: 200px;
+      font-family: sans-serif;
+    }
+    .mapboxgl-popup-content h3 {
+      margin: 0 0 5px;
+      font-size: 16px;
+    }
+    .mapboxgl-popup-content p {
+      margin: 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    // Mapbox Access Token
+    mapboxgl.accessToken = 'pk.eyJ1IjoidGltYXRldXMiLCJhIjoiY205MnR5czk2MGIyYzJqczlkajVjbng4dCJ9.QgIpFcYvDjkRxPzHM9o5yA';
+
+    // Chapter descriptions (ensure same length as coords)
+    const chapters = [
+      { title: 'Семей (Семипалатинск)', description: '...' },
+      { title: 'Аягоз', description: '...' },
+      { title: 'Сопка Аркат', description: '...' },
+      // ... add all chapter objects for each coordinate
+    ];
+
+    // Coordinates of the route
+    const coords = [
+      [80.2275, 50.4111], [80.4392, 47.9656], [80.95, 47.85], [79.375, 47.74],
+      [78.2, 46.3], [78.95, 46.25], [79.6081, 45.5136], [78.2117, 43.5642],
+      [78.7, 43.35], [79.07, 43.35], [79.1425, 42.7519], [79.17, 42.724],
+      [78.3642, 42.7278], [78.3936, 42.49], [78.65, 43.2], [78.6103, 43.2031],
+      [77.4517, 43.355], [76.8897, 43.2389], [76.8203, 43.8039], [78.5, 44.0],
+      [78.2078, 44.8681], [79.0556, 45.1081], [79.0569, 45.1314]
+    ];
+
+    // Create Turf LineString and compute segment lengths
+    const line = turf.lineString(coords);
+    const segmentLengths = coords.slice(1).map((_, i) =>
+      turf.distance(turf.point(coords[i]), turf.point(coords[i+1]), { units: 'kilometers' })
+    );
+    const totalLength = segmentLengths.reduce((sum, d) => sum + d, 0);
+    const cumulative = segmentLengths.reduce((acc, d) => {
+      acc.push(acc[acc.length-1] + d);
+      return acc;
+    }, [0]);
+
+    // Initialize Map
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      center: coords[0],
+      zoom: 6,
+      pitch: 60,
+      bearing: 0,
+      projection: 'globe'
+    });
+
+    let popup;
+    let phase = 0;              // progress 0..1
+    const sensitivity = 0.001;  // adjust scroll sensitivity
+
+    map.on('load', () => {
+      // Add route source & layer
+      map.addSource('route', { type: 'geojson', data: line, lineMetrics: true });
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-width': 6, 'line-gradient': ['step', ['line-progress'], 'yellow', 0, 'rgba(0,0,0,0)'] }
+      });
+
+      // Wheel event to update phase
+      window.addEventListener('wheel', (e) => {
+        // update progress
+        phase = Math.min(Math.max(phase + e.deltaY * sensitivity, 0), 1);
+        updateAnimation(phase);
+        e.preventDefault();
+      }, { passive: false });
+    });
+
+    function updateAnimation(p) {
+      // reveal line
+      map.setPaintProperty('route-line', 'line-gradient', ['step', ['line-progress'], 'yellow', p, 'rgba(0,0,0,0)']);
+      // camera movement
+      const distance = totalLength * p;
+      const coord = turf.along(line, distance, { units: 'kilometers' }).geometry.coordinates;
+      const bearing = -120 * p;
+      map.easeTo({ center: coord, bearing: bearing, pitch: 60, zoom: 7, duration: 100 });
+      // popup
+      const idx = cumulative.findIndex((d, i) => distance < cumulative[i+1]);
+      if (idx > -1 && chapters[idx]) {
+        if (popup) popup.remove();
+        const chap = chapters[idx];
+        popup = new mapboxgl.Popup({ closeOnClick: false, closeButton: false })
+               .setLngLat(coords[idx])
+               .setHTML(`<h3>${chap.title}</h3><p>${chap.description}</p>`)
+               .addTo(map);
+      }
+    }
+  </script>
+</body>
+</html>
